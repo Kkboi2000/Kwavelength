@@ -493,6 +493,7 @@
       if(spinning) return;
       spinning=true;
       $("spinBtn").disabled=true;
+      setNeedle(0);   // pointing arm jumps back to the middle on each new spin
 
       // FIXED 3-second spin, never longer. The wheel rolls at a steady speed
       // for the first 2.5s, then decelerates to a stop over the final 0.5s.
