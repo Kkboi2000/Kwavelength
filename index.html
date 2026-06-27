@@ -195,12 +195,20 @@
     <!-- DIAL -->
     <div class="dial-wrap">
       <svg class="dial-svg" id="dialSvg" viewBox="0 0 400 248" aria-label="Kwavelength dial">
+        <defs>
+          <!-- clip the rotating wheel to the top semicircular face so bands that
+               roll below horizontal are cleanly cut off (no second range, no
+               bleed past the dial edge) -->
+          <clipPath id="faceClip">
+            <path d="M 14 228 A 186 186 0 0 1 386 228 Z"></path>
+          </clipPath>
+        </defs>
         <g id="scallopGroup"></g>
         <path class="dial-face-top" d="M 14 228 A 186 186 0 0 1 386 228 Z"></path>
         <path class="dial-face-bottom" d="M 14 228 A 186 186 0 0 0 386 228 Z"></path>
         <g id="starGroup"></g>
-        <g id="wedgeGroup"></g>
-        <g id="numGroup"></g>
+        <g id="wedgeGroup" clip-path="url(#faceClip)"></g>
+        <g id="numGroup" clip-path="url(#faceClip)"></g>
         <path id="targetShield" class="target-shield" d="M 14 228 A 186 186 0 0 1 386 228 Z"></path>
         <g id="crankGroup">
           <rect class="crank-arm" x="384" y="219" width="70" height="18" rx="9"></rect>
@@ -295,7 +303,7 @@
     const BAND_VALUES=[2,3,4,3,2];
     const BAND_WIDTH=9;
     const TOTAL_SPAN=BAND_VALUES.length*BAND_WIDTH;
-    const PLAY_LIMIT=78;
+    const PLAY_LIMIT=90;   // needle reaches the full semicircle: -90 (left) .. +90 (right)
     const SPIN_MS=3000; // 3s animation, slowing toward the end
 
     // ---- languages ----
@@ -433,30 +441,27 @@
     function polar(deg,r){const rad=deg*Math.PI/180;return {x:CX+Math.sin(rad)*r,y:CY-Math.cos(rad)*r};}
     function wedgePath(a0,a1,r){const p0=polar(a0,r),p1=polar(a1,r),large=(a1-a0)>180?1:0;return `M ${CX} ${CY} L ${p0.x} ${p0.y} A ${r} ${r} 0 ${large} 1 ${p1.x} ${p1.y} Z`;}
 
-    // The scoring cluster is drawn at the top (centered on 0deg) AND a mirror
-    // copy 180deg opposite. Because the two are half a turn apart, whenever one
-    // sits on the visible top face the other is tucked into the hidden bottom
-    // half -- so a spin ALWAYS shows exactly one score range, never zero, never
-    // two. The whole wheel (both clusters + numbers) rotates as one group.
+    // A SINGLE scoring cluster, drawn centered at the top (0deg) and rotated as
+    // one group. There is no opposite twin: the cluster is clipped to the dial's
+    // circular face (see #faceClip), so when the 4 lands near a horizontal end
+    // the outer bands simply roll past the edge and clip off-screen, and no
+    // second range can ever appear on the board.
     function drawBands(){
       wedgeGroup.innerHTML="";numGroup.innerHTML="";
       const photoFill=["#f3b50a","#e8642a","#9cc3dd","#e8642a","#f3b50a"];
-      const clusters=[0,180];                    // primary at top, twin opposite
-      clusters.forEach(offset=>{
-        const start=offset - TOTAL_SPAN/2;
-        for(let i=0;i<BAND_VALUES.length;i++){
-          const a0=start+i*BAND_WIDTH,a1=a0+BAND_WIDTH;
-          const path=document.createElementNS("http://www.w3.org/2000/svg","path");
-          path.setAttribute("d",wedgePath(a0,a1,R_FACE-2));
-          path.setAttribute("fill",photoFill[i]);
-          wedgeGroup.appendChild(path);
-          const mid=(a0+a1)/2,np=polar(mid,R_FACE-22);
-          const t=document.createElementNS("http://www.w3.org/2000/svg","text");
-          t.setAttribute("x",np.x);t.setAttribute("y",np.y);t.setAttribute("class","band-num");
-          t.textContent=BAND_VALUES[i];
-          numGroup.appendChild(t);
-        }
-      });
+      const start=-TOTAL_SPAN/2;                  // single cluster centered on top
+      for(let i=0;i<BAND_VALUES.length;i++){
+        const a0=start+i*BAND_WIDTH,a1=a0+BAND_WIDTH;
+        const path=document.createElementNS("http://www.w3.org/2000/svg","path");
+        path.setAttribute("d",wedgePath(a0,a1,R_FACE-2));
+        path.setAttribute("fill",photoFill[i]);
+        wedgeGroup.appendChild(path);
+        const mid=(a0+a1)/2,np=polar(mid,R_FACE-22);
+        const t=document.createElementNS("http://www.w3.org/2000/svg","text");
+        t.setAttribute("x",np.x);t.setAttribute("y",np.y);t.setAttribute("class","band-num");
+        t.textContent=BAND_VALUES[i];
+        numGroup.appendChild(t);
+      }
       applyWheelRotation();
     }
 
@@ -499,7 +504,16 @@
       // for the first 2.5s, then decelerates to a stop over the final 0.5s.
       // Speed is derived from the distance so it lands EXACTLY at 3s -- the
       // duration is the constant, not the speed.
-      const SAFE_LIMIT = 58;        // landing window (full range stays on top face)
+      // Landing window: the score range can now sweep all the way to the
+      // horizontal ends of the dial. The range is 45deg wide (+-22.5deg), so a
+      // center of +-67.5deg puts its outer edge exactly at horizontal -- still
+      // fully on the visible face, and its 180deg twin still fully in the hidden
+      // bottom half. So a spin always shows exactly one full score range.
+      // The 4 (range center) can now land anywhere across the full dial, all the
+      // way to the flat horizontal ends. When it lands near an end the outer
+      // bands roll past horizontal and are clipped by the dial face (#faceClip).
+      // No twin exists, so only ever one range is on the board.
+      const SAFE_LIMIT = 90;       // range center reaches flat horizontal (+-90deg)
       const TOTAL_MS   = 3000;      // hard cap: spin is always 3s
       const DECEL_MS   = 500;       // final 0.5s slow-down
       const CRUISE_MS  = TOTAL_MS - DECEL_MS;
