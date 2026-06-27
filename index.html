@@ -488,45 +488,77 @@
       if(spinning) return;
       spinning=true;
       $("spinBtn").disabled=true;
-      playSpin();
 
-      // Roll like a real wheel: several full turns plus a random landing offset,
-      // all in one direction, easing to a smooth stop. The final resting
-      // position (mod 360) is where the bands settle for scoring.
+      // Roll like a real wheel at a steady, leisurely speed, then decelerate
+      // only during the final 0.5s. Speed is ~5x slower than the old whip-fast
+      // ease, so the turns are clearly visible the whole way round.
       const startAngle=state.targetAngle % 360;
       const fullTurns=4 + Math.floor(Math.random()*3);       // 4-6 complete revolutions
       const landing=(Math.random()*2-1)*PLAY_LIMIT*0.82;     // final visible angle near top
       const totalDelta=fullTurns*360 + (landing - startAngle);
-      const finalAngle=startAngle + totalDelta;
+
+      // Cruise at a constant angular velocity, reserving the last DECEL_MS to
+      // ease to a stop. Total time scales with the distance so the *speed*
+      // (not the duration) is what's fixed and slow.
+      const CRUISE_DPS = 360 * 0.9;          // degrees/sec during the steady roll (~0.9 turn/s)
+      const DECEL_MS   = 500;                 // final slow-down window: 0.5s
+      const absDelta   = Math.abs(totalDelta);
+      // During decel (constant deceleration from cruise speed to 0) the wheel
+      // covers cruiseDps*DECEL/2 degrees. The rest is covered at cruise speed.
+      const decelDeg   = (CRUISE_DPS) * (DECEL_MS/1000) / 2;
+      const cruiseDeg  = Math.max(0, absDelta - decelDeg);
+      const cruiseMs   = (cruiseDeg / CRUISE_DPS) * 1000;
+      const totalMs    = cruiseMs + DECEL_MS;
+      const dir        = totalDelta < 0 ? -1 : 1;
+
+      playSpin(totalMs);
 
       const t0=performance.now();
       function frame(now){
-        const p=Math.min(1,(now-t0)/SPIN_MS);
-        // quintic ease-out: fast launch, long graceful slow-down at the end
-        const ease=1-Math.pow(1-p,5);
-        state.targetAngle=startAngle + totalDelta*ease;
+        const t=now-t0;
+        let progressedDeg;
+        if(t < cruiseMs){
+          // steady constant-speed roll
+          progressedDeg = CRUISE_DPS * (t/1000);
+        }else if(t < totalMs){
+          // final 0.5s: linear deceleration cruise -> 0
+          const td=(t-cruiseMs)/1000;                  // seconds into decel
+          const v0=CRUISE_DPS;
+          progressedDeg = cruiseDeg + (v0*td - 0.5*(v0/(DECEL_MS/1000))*td*td);
+        }else{
+          progressedDeg = absDelta;
+        }
+        state.targetAngle = startAngle + dir*Math.min(progressedDeg, absDelta);
         applyWheelRotation();
-        if(p<1){requestAnimationFrame(frame);}
+        if(t < totalMs){ requestAnimationFrame(frame); }
         else{
-          state.targetAngle=landing;   // normalize to the resting angle
+          state.targetAngle = landing;   // normalize to the resting angle
           applyWheelRotation();
           spinning=false; $("spinBtn").disabled=false;
         }
       }
       requestAnimationFrame(frame);
     }
-    function playSpin(){
+    function playSpin(totalMs){
       if(state.sound!=="on") return;
-      try{ spinSound.currentTime=0; const pr=spinSound.play(); if(pr&&pr.catch)pr.catch(()=>{});}catch(e){}
-      // fade the 5s clip out as the 3s animation ends
-      spinSound.volume=1;
-      setTimeout(()=>{ fadeOut(spinSound,500); }, SPIN_MS-400);
+      try{
+        spinSound.currentTime=0;
+        spinSound.volume=1;
+        // loop the clip if the spin runs longer than the audio, so the whirr
+        // covers the whole roll; we stop it explicitly at the end.
+        spinSound.loop = true;
+        const pr=spinSound.play(); if(pr&&pr.catch)pr.catch(()=>{});
+      }catch(e){}
+      const ms = (typeof totalMs==="number" && totalMs>0) ? totalMs : 3000;
+      // begin fading ~0.5s before the wheel stops, finishing as it settles
+      const fadeStart = Math.max(0, ms - 500);
+      setTimeout(()=>{ fadeOut(spinSound, 500); }, fadeStart);
     }
     function fadeOut(audio,ms){
       const steps=10,dv=audio.volume/steps,iv=ms/steps;
       let i=0;const timer=setInterval(()=>{
         i++; audio.volume=Math.max(0,audio.volume-dv);
-        if(i>=steps){clearInterval(timer);audio.pause();audio.currentTime=0;audio.volume=1;}
+        if(i>=steps){clearInterval(timer);audio.pause();audio.loop=false;audio.currentTime=0;audio.volume=1;}
       },iv);
     }
     function playPing(){
