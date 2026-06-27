@@ -433,25 +433,30 @@
     function polar(deg,r){const rad=deg*Math.PI/180;return {x:CX+Math.sin(rad)*r,y:CY-Math.cos(rad)*r};}
     function wedgePath(a0,a1,r){const p0=polar(a0,r),p1=polar(a1,r),large=(a1-a0)>180?1:0;return `M ${CX} ${CY} L ${p0.x} ${p0.y} A ${r} ${r} 0 ${large} 1 ${p1.x} ${p1.y} Z`;}
 
-    // Bands are drawn ONCE centered on the top (0deg). The whole wheel
-    // (wedges + numbers) is then rotated as a group via an SVG transform,
-    // so a spin can roll through full 360deg turns like a real wheel.
+    // The scoring cluster is drawn at the top (centered on 0deg) AND a mirror
+    // copy 180deg opposite. Because the two are half a turn apart, whenever one
+    // sits on the visible top face the other is tucked into the hidden bottom
+    // half -- so a spin ALWAYS shows exactly one score range, never zero, never
+    // two. The whole wheel (both clusters + numbers) rotates as one group.
     function drawBands(){
       wedgeGroup.innerHTML="";numGroup.innerHTML="";
       const photoFill=["#f3b50a","#e8642a","#9cc3dd","#e8642a","#f3b50a"];
-      const start=-TOTAL_SPAN/2;                 // centered on 0deg (straight up)
-      for(let i=0;i<BAND_VALUES.length;i++){
-        const a0=start+i*BAND_WIDTH,a1=a0+BAND_WIDTH;
-        const path=document.createElementNS("http://www.w3.org/2000/svg","path");
-        path.setAttribute("d",wedgePath(a0,a1,R_FACE-2));
-        path.setAttribute("fill",photoFill[i]);
-        wedgeGroup.appendChild(path);
-        const mid=(a0+a1)/2,np=polar(mid,R_FACE-22);
-        const t=document.createElementNS("http://www.w3.org/2000/svg","text");
-        t.setAttribute("x",np.x);t.setAttribute("y",np.y);t.setAttribute("class","band-num");
-        t.textContent=BAND_VALUES[i];
-        numGroup.appendChild(t);
-      }
+      const clusters=[0,180];                    // primary at top, twin opposite
+      clusters.forEach(offset=>{
+        const start=offset - TOTAL_SPAN/2;
+        for(let i=0;i<BAND_VALUES.length;i++){
+          const a0=start+i*BAND_WIDTH,a1=a0+BAND_WIDTH;
+          const path=document.createElementNS("http://www.w3.org/2000/svg","path");
+          path.setAttribute("d",wedgePath(a0,a1,R_FACE-2));
+          path.setAttribute("fill",photoFill[i]);
+          wedgeGroup.appendChild(path);
+          const mid=(a0+a1)/2,np=polar(mid,R_FACE-22);
+          const t=document.createElementNS("http://www.w3.org/2000/svg","text");
+          t.setAttribute("x",np.x);t.setAttribute("y",np.y);t.setAttribute("class","band-num");
+          t.textContent=BAND_VALUES[i];
+          numGroup.appendChild(t);
+        }
+      });
       applyWheelRotation();
     }
 
@@ -489,48 +494,46 @@
       spinning=true;
       $("spinBtn").disabled=true;
 
-      // Roll like a real wheel at a steady, leisurely speed, then decelerate
-      // only during the final 0.5s. Speed is ~5x slower than the old whip-fast
-      // ease, so the turns are clearly visible the whole way round.
+      // FIXED 3-second spin, never longer. The wheel rolls at a steady speed
+      // for the first 2.5s, then decelerates to a stop over the final 0.5s.
+      // Speed is derived from the distance so it lands EXACTLY at 3s -- the
+      // duration is the constant, not the speed.
+      const SAFE_LIMIT = 58;        // landing window (full range stays on top face)
+      const TOTAL_MS   = 3000;      // hard cap: spin is always 3s
+      const DECEL_MS   = 500;       // final 0.5s slow-down
+      const CRUISE_MS  = TOTAL_MS - DECEL_MS;
+
       const startAngle=state.targetAngle % 360;
-      const fullTurns=4 + Math.floor(Math.random()*3);       // 4-6 complete revolutions
-      const landing=(Math.random()*2-1)*PLAY_LIMIT*0.82;     // final visible angle near top
+      const fullTurns=2;                                     // turns that fit cleanly in 3s
+      const landing=(Math.random()*2-1)*SAFE_LIMIT;          // final visible angle near top
       const totalDelta=fullTurns*360 + (landing - startAngle);
+      const absDelta=Math.abs(totalDelta);
+      const dir = totalDelta < 0 ? -1 : 1;
 
-      // Cruise at a constant angular velocity, reserving the last DECEL_MS to
-      // ease to a stop. Total time scales with the distance so the *speed*
-      // (not the duration) is what's fixed and slow.
-      const CRUISE_DPS = 360 * 0.9;          // degrees/sec during the steady roll (~0.9 turn/s)
-      const DECEL_MS   = 500;                 // final slow-down window: 0.5s
-      const absDelta   = Math.abs(totalDelta);
-      // During decel (constant deceleration from cruise speed to 0) the wheel
-      // covers cruiseDps*DECEL/2 degrees. The rest is covered at cruise speed.
-      const decelDeg   = (CRUISE_DPS) * (DECEL_MS/1000) / 2;
-      const cruiseDeg  = Math.max(0, absDelta - decelDeg);
-      const cruiseMs   = (cruiseDeg / CRUISE_DPS) * 1000;
-      const totalMs    = cruiseMs + DECEL_MS;
-      const dir        = totalDelta < 0 ? -1 : 1;
+      // Constant cruise speed v (deg/sec) such that distance covered in
+      // CRUISE at v plus DECEL (v -> 0, linear) equals absDelta, in exactly 3s:
+      //   absDelta = v*cruiseSec + v*decelSec/2
+      const cruiseSec=CRUISE_MS/1000, decelSec=DECEL_MS/1000;
+      const v = absDelta / (cruiseSec + decelSec/2);   // deg per second
+      const cruiseDeg = v*cruiseSec;
 
-      playSpin(totalMs);
+      playSpin(TOTAL_MS);
 
       const t0=performance.now();
       function frame(now){
         const t=now-t0;
         let progressedDeg;
-        if(t < cruiseMs){
-          // steady constant-speed roll
-          progressedDeg = CRUISE_DPS * (t/1000);
-        }else if(t < totalMs){
-          // final 0.5s: linear deceleration cruise -> 0
-          const td=(t-cruiseMs)/1000;                  // seconds into decel
-          const v0=CRUISE_DPS;
-          progressedDeg = cruiseDeg + (v0*td - 0.5*(v0/(DECEL_MS/1000))*td*td);
+        if(t < CRUISE_MS){
+          progressedDeg = v*(t/1000);                         // steady roll
+        }else if(t < TOTAL_MS){
+          const td=(t-CRUISE_MS)/1000;                        // sec into decel
+          progressedDeg = cruiseDeg + (v*td - 0.5*(v/decelSec)*td*td);  // ease to 0
         }else{
           progressedDeg = absDelta;
         }
         state.targetAngle = startAngle + dir*Math.min(progressedDeg, absDelta);
         applyWheelRotation();
-        if(t < totalMs){ requestAnimationFrame(frame); }
+        if(t < TOTAL_MS){ requestAnimationFrame(frame); }
         else{
           state.targetAngle = landing;   // normalize to the resting angle
           applyWheelRotation();
