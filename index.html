@@ -488,8 +488,8 @@
 
       // Animate the scalloped rim so it gently ripples while the score range spins.
       // The rim oscillates and subtly expands/contracts based on the wheel angle.
-      const rippleAngle = Math.sin(state.targetAngle * Math.PI / 18) * 4;
-      const rippleScale = 1 + Math.sin(state.targetAngle * Math.PI / 12) * 0.012;
+      const rippleAngle = Math.sin(state.targetAngle * Math.PI / 11) * 2;
+      const rippleScale = 1 + Math.sin(state.targetAngle * Math.PI / 9) * 0.008;
       scallopGroup.setAttribute(
         "transform",
         `translate(${CX} ${CY}) rotate(${rippleAngle}) scale(${rippleScale}) translate(${-CX} ${-CY})`
